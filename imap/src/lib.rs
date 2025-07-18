@@ -2,7 +2,8 @@ use rustls::{RootCertStore, StreamOwned};
 use rustls::pki_types::ServerName;
 use std::net::TcpStream;
 use std::sync::Arc;
-use std::io::{BufRead, BufReader};
+use std::io::BufRead;
+use std::io::Write;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -43,6 +44,7 @@ pub struct Messages {
     messages: Vec<Result<Message, ImapError>>,
 }
 
+#[derive(Debug)]
 enum ConnectionType {
     Tls,
     StartTls,
@@ -85,7 +87,10 @@ impl Builder {
 }
 
 impl Connector {
+    #[tracing::instrument(skip(self), fields(addr = %self.addr, conn_type = ?self.conn_type))]
     pub fn connect(self) -> Result<Client, ImapError> {
+        tracing::info!("Connecting to IMAP server");
+        
         match self.conn_type {
             ConnectionType::Tls => {
                 let (host, _) = self
@@ -114,8 +119,11 @@ impl Connector {
                     .map_err(|e| ImapError::Tls(e.to_string()))?;
                 let mut stream = rustls::StreamOwned::new(conn, sock);
                 
-                // The first read derives the TLS handshake implicitly
+                // Since we have to read the greeting, we don't have to derive the TLS handshake
+                // manually. The first read will derive the TLS handshake implicitly.
                 Self::greeting(&mut stream)?;
+
+                tracing::info!("TLS connection established");
                 
                 Ok(Client { stream })
             }
@@ -150,7 +158,31 @@ pub fn connect_plain(addr: &str) -> Result<Client, ImapError> {
 }
 
 impl Client {
-    pub fn login(self, user: &str, pass: &str) -> Result<Session, ImapError> {
+    #[tracing::instrument(skip(self, pass))]
+    pub fn login(mut self, user: &str, pass: &str) -> Result<Session, ImapError> {
+        tracing::info!("Attempting IMAP login");
+
+        self.stream.write_all(format!("a001 LOGIN {} {}\r\n", user, pass).as_bytes())
+            .map_err(|e| ImapError::Io(e.to_string()))?;
+
+        let mut line = String::new();
+        self.stream.read_line(&mut line)
+            .map_err(|e| ImapError::Io(e.to_string()))?;
+
+        if !line.starts_with("* CAPABILITY") {
+            return Err(ImapError::Connection(line));
+        }
+        
+        line.clear();
+        self.stream.read_line(&mut line)
+            .map_err(|e| ImapError::Io(e.to_string()))?;
+
+        if !line.starts_with("a001 OK") {
+            return Err(ImapError::Connection(line));
+        }
+        
+        tracing::info!("IMAP login successful");
+
         Ok(Session { stream: self.stream })
     }
 }

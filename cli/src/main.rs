@@ -1,6 +1,8 @@
 use std::env;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    tracing_subscriber::fmt::init();
+
     let email = env::var("IMAP_EMAIL")?;
     let password = env::var("IMAP_PASSWORD")?;
     let imap_server = env::var("IMAP_SERVER")?;
