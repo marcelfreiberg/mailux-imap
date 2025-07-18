@@ -1,10 +1,11 @@
-use imap::Builder;
-
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let client = Builder::new("imap.example.com:993").build()?;
-    // let client = Builder::new("imap.example.com:993").tls().build()?; <-- default
-    // let client = Builder::new("imap.example.com:993").starttls().build()?;
-    // let client = Builder::new("imap.example.com:993").plain().build()?;
+    let client = imap::connect_tls("imap.example.com:993")?;
+    
+    // Or use the builder pattern with direct connect:
+    // let mut client = imap::Builder::new("imap.example.com:993").tls().connect()?;
+    
+    // Or use the full explicit builder pattern:
+    // let mut client = imap::Builder::new("imap.example.com:993").tls().build().connect()?;
 
     let mut session = client.login("user", "pw")?;
 
