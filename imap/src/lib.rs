@@ -2,6 +2,7 @@ use rustls::{RootCertStore, StreamOwned};
 use rustls::pki_types::ServerName;
 use std::net::TcpStream;
 use std::sync::Arc;
+use std::io::{BufRead, BufReader};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -87,33 +88,52 @@ impl Connector {
     pub fn connect(self) -> Result<Client, ImapError> {
         match self.conn_type {
             ConnectionType::Tls => {
-                let root_store = RootCertStore {
-                    roots: webpki_roots::TLS_SERVER_ROOTS.into(),
-                };
-
-                let config = rustls::ClientConfig::builder()
-                    .with_root_certificates(root_store)
-                    .with_no_client_auth();
-
                 let (host, _) = self
                     .addr
                     .rsplit_once(':')
                     .ok_or_else(|| ImapError::DnsName(self.addr.clone()))?;
 
+                let root_store = RootCertStore {
+                    roots: webpki_roots::TLS_SERVER_ROOTS.into(),
+                };
+
+                let mut config = rustls::ClientConfig::builder()
+                    .with_root_certificates(root_store)
+                    .with_no_client_auth();
+                
+                if cfg!(debug_assertions) {
+                    config.key_log = Arc::new(rustls::KeyLogFile::new());
+                }
+
                 let server_name = ServerName::try_from(host.to_string())
                     .map_err(|e| ImapError::DnsName(e.to_string()))?;
+
                 let conn = rustls::ClientConnection::new(Arc::new(config), server_name)
                     .map_err(|e| ImapError::Io(e.to_string()))?;
                 let sock = TcpStream::connect(&self.addr)
                     .map_err(|e| ImapError::Tls(e.to_string()))?;
-                let stream = rustls::StreamOwned::new(conn, sock);
-
+                let mut stream = rustls::StreamOwned::new(conn, sock);
+                
+                // The first read derives the TLS handshake implicitly
+                Self::greeting(&mut stream)?;
+                
                 Ok(Client { stream })
             }
             _ => Err(ImapError::Connection(
                 "Connection type not implemented".to_string(),
             )),
         }
+    }
+    
+    fn greeting(stream: &mut StreamOwned<rustls::ClientConnection, TcpStream>) -> Result<(), ImapError> {
+        let mut line = String::new();
+        stream.read_line(&mut line).map_err(|e| ImapError::Io(e.to_string()))?;
+
+        if !line.starts_with("* OK") {
+            return Err(ImapError::Connection(line));
+        }
+
+        Ok(())
     }
 }
 

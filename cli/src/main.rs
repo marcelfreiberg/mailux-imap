@@ -1,13 +1,15 @@
+use std::env;
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let client = imap::connect_tls("imap.example.com:993")?;
-    
-    // Or use the builder pattern with direct connect:
+    let email = env::var("IMAP_EMAIL")?;
+    let password = env::var("IMAP_PASSWORD")?;
+    let imap_server = env::var("IMAP_SERVER")?;
+
+    let client = imap::connect_tls(&imap_server)?;
     // let mut client = imap::Builder::new("imap.example.com:993").tls().connect()?;
-    
-    // Or use the full explicit builder pattern:
     // let mut client = imap::Builder::new("imap.example.com:993").tls().build().connect()?;
 
-    let mut session = client.login("user", "pw")?;
+    let mut session = client.login(&email, &password)?;
 
     let mut msgs = session.fetch("INBOX", 2)?;
     // let mut msgs = session.fetch("INBOX", "1:5")?;
