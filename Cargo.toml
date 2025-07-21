@@ -9,4 +9,4 @@ members = [
 edition = "2021"
 
 [workspace.dependencies]
-imap = { path = "imap" }
+imap = { path = "imap", default-features = true }
