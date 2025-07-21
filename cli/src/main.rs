@@ -37,8 +37,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let password = env::var("IMAP_PASSWORD")?;
     let imap_server = env::var("IMAP_SERVER")?;
 
-    // let client = imap::connect_tls(&imap_server)?;
-    // let mut client = Builder::new(&imap_server).tls().connect()?;
+    // let client = imap::connect_tls(&imap_server).await?;
+    // let client = Builder::new(&imap_server).tls().connect().await?;
     let client = Builder::new(&imap_server).tls().build().connect().await?;
 
     let mut session = client.login(&email, &password).await?;
