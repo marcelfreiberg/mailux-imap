@@ -27,11 +27,7 @@ pub struct Connector {
 
 pub struct Client<State = Connected> {
     framed: FramedRead<TlsStream<TcpStream>, ImapCodec>,
-    _state: PhantomData<State>,
-}
-
-pub struct Session {
-    framed: FramedRead<TlsStream<TcpStream>, ImapCodec>,
+    state: PhantomData<State>,
 }
 
 #[derive(Debug)]
@@ -129,7 +125,7 @@ impl Connector {
 
                 Ok(Client {
                     framed,
-                    _state: PhantomData,
+                    state: PhantomData,
                 })
             }
             _ => Err(ImapError::ConnectionFailed(
@@ -177,7 +173,7 @@ pub async fn connect_plain(addr: &str) -> Result<Client<Connected>, ImapError> {
 
 impl Client<Connected> {
     #[tracing::instrument(skip(self, pass))]
-    pub async fn login(mut self, user: &str, pass: &str) -> Result<Session, ImapError> {
+    pub async fn login(mut self, user: &str, pass: &str) -> Result<Client<Authenticated>, ImapError> {
         tracing::info!("Attempting IMAP login");
 
         self.framed
@@ -191,8 +187,9 @@ impl Client<Connected> {
                     match status {
                         crate::parser::Status::Ok => {
                             tracing::info!("IMAP login successful");
-                            return Ok(Session {
+                            return Ok(Client {
                                 framed: self.framed,
+                                state: PhantomData,
                             });
                         }
                         _ => {
@@ -219,7 +216,7 @@ impl Client<Connected> {
     }
 }
 
-impl Session {
+impl Client<Authenticated> {
     pub async fn fetch(&mut self, _mailbox: &str, _id: u32) -> Result<Messages, ImapError> {
         Ok(Messages {
             messages: vec![
