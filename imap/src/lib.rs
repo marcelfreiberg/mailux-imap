@@ -1,6 +1,8 @@
 mod error;
 pub use error::ImapError;
 
+mod tls;
+
 pub mod parser;
 mod messages;
 

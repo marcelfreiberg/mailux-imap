@@ -1,8 +1,5 @@
 use bytes::{Buf, BytesMut};
-use rustls::RootCertStore;
-use rustls::pki_types::ServerName;
 use std::marker::PhantomData;
-use std::sync::Arc;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
 use tokio_rustls::TlsConnector;
@@ -12,6 +9,7 @@ use tokio_util::codec::{Decoder, FramedRead};
 
 use crate::ImapError;
 use crate::messages::{Message, Messages};
+use crate::tls;
 
 // Connection states
 pub struct Connected;
@@ -61,7 +59,7 @@ impl Decoder for ImapCodec {
         }
 
         let parse_result = crate::parser::try_parse_response(buf);
-        
+
         match parse_result.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))? {
             Some((resp, cnt)) => {
                 buf.advance(cnt);
@@ -114,34 +112,12 @@ impl Connector {
 
         match self.conn_type {
             ConnectionType::Tls => {
-                let (host, _) = self
-                    .addr
-                    .rsplit_once(':')
-                    .ok_or_else(|| ImapError::DnsName(self.addr.clone()))?;
+                let config = tls::create_tls_config();
+                let server_name = tls::parse_server_name(&self.addr)?;
 
-                let root_store = RootCertStore {
-                    roots: webpki_roots::TLS_SERVER_ROOTS.into(),
-                };
-
-                let mut config = rustls::ClientConfig::builder()
-                    .with_root_certificates(root_store)
-                    .with_no_client_auth();
-
-                if cfg!(debug_assertions) {
-                    config.key_log = Arc::new(rustls::KeyLogFile::new());
-                }
-
-                let server_name = ServerName::try_from(host.to_string())
-                    .map_err(|e| ImapError::DnsName(e.to_string()))?;
-
-                let connector = TlsConnector::from(Arc::new(config));
-                let sock = TcpStream::connect(&self.addr)
-                    .await
-                    .map_err(|e| ImapError::Tls(e.to_string()))?;
-                let stream = connector
-                    .connect(server_name, sock)
-                    .await
-                    .map_err(|e| ImapError::Tls(e.to_string()))?;
+                let connector = TlsConnector::from(config);
+                let sock = TcpStream::connect(&self.addr).await?;
+                let stream = connector.connect(server_name, sock).await?;
 
                 let mut framed = FramedRead::new(stream, ImapCodec::new());
 
@@ -156,7 +132,7 @@ impl Connector {
                     _state: PhantomData,
                 })
             }
-            _ => Err(ImapError::Connection(
+            _ => Err(ImapError::ConnectionFailed(
                 "Connection type not implemented".to_string(),
             )),
         }
@@ -168,20 +144,21 @@ impl Connector {
         let resp = framed
             .next()
             .await
-            .ok_or_else(|| ImapError::Connection("EOF while reading greeting".to_string()))?
-            .map_err(|e| ImapError::Io(e.to_string()))?;
+            .ok_or_else(|| ImapError::ConnectionFailed("EOF while reading greeting".to_string()))??;
 
         match resp {
-            crate::parser::Response::Greeting(greeting) => {
-                match greeting.status {
-                    crate::parser::Status::Ok => {
-                        tracing::info!("Received OK greeting from server");
-                        Ok(())
-                    }
-                    _ => Err(ImapError::Connection("Invalid greeting from server".to_string())),
+            crate::parser::Response::Greeting(greeting) => match greeting.status {
+                crate::parser::Status::Ok => {
+                    tracing::info!("Received OK greeting from server");
+                    Ok(())
                 }
-            }
-            _ => Err(ImapError::Connection("Expected greeting from server".to_string())),
+                _ => Err(ImapError::ConnectionFailed(
+                    "Invalid greeting from server".to_string(),
+                )),
+            },
+            _ => Err(ImapError::ConnectionFailed(
+                "Expected greeting from server".to_string(),
+            )),
         }
     }
 }
@@ -206,13 +183,10 @@ impl Client<Connected> {
         self.framed
             .get_mut()
             .write_all(format!("a001 LOGIN {} {}\r\n", user, pass).as_bytes())
-            .await
-            .map_err(|e| ImapError::Io(e.to_string()))?;
+            .await?;
 
         while let Some(result) = self.framed.next().await {
-            let resp = result.map_err(|e| ImapError::Io(e.to_string()))?;
-
-            match resp {
+            match result? {
                 crate::parser::Response::Tagged { tag, status, .. } if tag.as_ref() == b"a001" => {
                     match status {
                         crate::parser::Status::Ok => {
@@ -222,13 +196,15 @@ impl Client<Connected> {
                             });
                         }
                         _ => {
-                            return Err(ImapError::Connection("Login failed".to_string()));
+                            return Err(ImapError::ConnectionFailed("Login failed".to_string()));
                         }
                     }
                 }
                 crate::parser::Response::Greeting(greeting) => {
                     if matches!(greeting.status, crate::parser::Status::Bye) {
-                        return Err(ImapError::Connection("Server closed connection".to_string()));
+                        return Err(ImapError::ConnectionFailed(
+                            "Server closed connection".to_string(),
+                        ));
                     }
                 }
                 _ => {
@@ -237,7 +213,9 @@ impl Client<Connected> {
             }
         }
 
-        Err(ImapError::Connection("Connection closed unexpectedly".to_string()))
+        Err(ImapError::ConnectionFailed(
+            "Connection closed unexpectedly".to_string(),
+        ))
     }
 }
 
