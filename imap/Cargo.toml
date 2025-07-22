@@ -5,7 +5,7 @@ edition = "2024"
 
 [features]
 default = [ "tokio-runtime" ]
-tokio-runtime = [ "dep:tokio", "dep:tokio-rustls", "dep:tokio-stream" ]
+tokio-runtime = [ "dep:tokio", "dep:tokio-rustls", "dep:tokio-util", "dep:tokio-stream" ]
 blocking = []
 
 [dependencies]
@@ -14,9 +14,9 @@ thiserror = "2.0.12"
 tracing = "0.1.41"
 webpki-roots = "1.0.1"
 bytes = "1.10.1"
-nom = "8.0.0"
+nom = { version = "8.0.0", default-features = false }
 
 tokio = { version = "1.46.1", features = [ "net", "rt", "io-util" ], optional = true }
 tokio-rustls = { version = "0.26.2", optional = true }
-tokio-util = { version = "0.7.15", features = ["codec"] }
+tokio-util = { version = "0.7.15", features = ["codec"], optional = true }
 tokio-stream = { version = "0.1.17", optional = true }

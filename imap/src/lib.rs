@@ -1,7 +1,7 @@
 mod error;
 pub use error::ImapError;
 
-mod parser;
+pub mod parser;
 mod messages;
 
 #[cfg(feature = "tokio-runtime")]
