@@ -7,9 +7,8 @@ use tokio_rustls::client::TlsStream;
 use tokio_stream::StreamExt;
 use tokio_util::codec::{Decoder, FramedRead};
 
-use crate::ImapError;
-use crate::messages::{Message, Messages};
-use crate::tls;
+use imap::{ImapError, tls};
+use imap::messages::{Message, Messages};
 
 // Connection states
 pub struct Connected;
@@ -46,7 +45,7 @@ impl ImapCodec {
 }
 
 impl Decoder for ImapCodec {
-    type Item = crate::parser::OwnedResponse;
+    type Item = imap::parser::OwnedResponse;
     type Error = std::io::Error;
 
     fn decode(&mut self, buf: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
@@ -54,7 +53,7 @@ impl Decoder for ImapCodec {
             return Ok(None);
         }
 
-        let parse_result = crate::parser::try_parse_response(buf);
+        let parse_result = imap::parser::try_parse_response(buf);
 
         match parse_result.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))? {
             Some((resp, cnt)) => {
@@ -143,8 +142,8 @@ impl Connector {
             .ok_or_else(|| ImapError::ConnectionFailed("EOF while reading greeting".to_string()))??;
 
         match resp {
-            crate::parser::Response::Greeting(greeting) => match greeting.status {
-                crate::parser::Status::Ok => {
+            imap::parser::Response::Greeting(greeting) => match greeting.status {
+                imap::parser::Status::Ok => {
                     tracing::info!("Received OK greeting from server");
                     Ok(())
                 }
@@ -183,9 +182,9 @@ impl Client<Connected> {
 
         while let Some(result) = self.framed.next().await {
             match result? {
-                crate::parser::Response::Tagged { tag, status, .. } if tag.as_ref() == b"a001" => {
+                imap::parser::Response::Tagged { tag, status, .. } if tag.as_ref() == b"a001" => {
                     match status {
-                        crate::parser::Status::Ok => {
+                        imap::parser::Status::Ok => {
                             tracing::info!("IMAP login successful");
                             return Ok(Client {
                                 framed: self.framed,
@@ -197,8 +196,8 @@ impl Client<Connected> {
                         }
                     }
                 }
-                crate::parser::Response::Greeting(greeting) => {
-                    if matches!(greeting.status, crate::parser::Status::Bye) {
+                imap::parser::Response::Greeting(greeting) => {
+                    if matches!(greeting.status, imap::parser::Status::Bye) {
                         return Err(ImapError::ConnectionFailed(
                             "Server closed connection".to_string(),
                         ));

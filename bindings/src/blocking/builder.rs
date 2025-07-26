@@ -4,9 +4,8 @@ use std::io::Write;
 use std::marker::PhantomData;
 use std::net::TcpStream;
 
-use crate::ImapError;
-use crate::messages::{Message, Messages};
-use crate::tls;
+use imap::{ImapError, tls};
+use imap::messages::{Message, Messages};
 
 // Connection states
 pub struct Connected;

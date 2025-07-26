@@ -2,7 +2,7 @@
 resolver = "2"
 members = [
     "imap",
-    "cli",
+    "bindings",
 ]
 
 [workspace.package]
