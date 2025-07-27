@@ -7,15 +7,14 @@ use nom::{
     combinator::value,
     sequence::{preceded, separated_pair, terminated},
 };
-use std::borrow::Cow;
 
 #[derive(Debug, Clone)]
 pub struct Greeting<'a> {
     pub status: Status,
-    pub text: Cow<'a, [u8]>,
+    pub text: &'a [u8],
 }
 
-pub fn try_parse_greeting(buf: &[u8]) -> Result<Option<(Greeting, usize)>, ParserError> {
+pub fn try_parse(buf: &[u8]) -> Result<Option<(Greeting, usize)>, ParserError> {
     match parse_greeting(buf) {
         Ok((remaining, greeting)) => Ok(Some((greeting, buf.offset(remaining)))),
         Err(nom::Err::Incomplete(_)) => Err(ParserError::Incomplete),
@@ -30,10 +29,7 @@ fn parse_greeting(i: &[u8]) -> IResult<&[u8], Greeting<'_>> {
             separated_pair(parse_greeting_status, tag(" "), take_until("\r\n")),
             crlf,
         )
-        .map(|(status, text)| Greeting {
-            status,
-            text: Cow::Borrowed(text),
-        }),
+        .map(|(status, text)| Greeting { status, text }),
     )
     .parse(i)
 }

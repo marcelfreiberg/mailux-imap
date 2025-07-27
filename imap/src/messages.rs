@@ -1,29 +1,32 @@
-use crate::ImapError;
+use crate::error::ImapError;
 
 pub struct Message {
-    // TODO: make this field private again
-    pub subject: String,
+    subject: String,
 }
 
 pub struct Messages {
-    // TODO: make this field private again
-    pub messages: Vec<Result<Message, ImapError>>,
+    messages: Vec<Message>,
 }
 
 impl Message {
+    pub fn new(subject: String) -> Self {
+        Self { subject }
+    }
+
     pub fn subject(&self) -> &str {
         &self.subject
     }
 }
 
 impl Messages {
+    pub fn new(messages: Vec<Message>) -> Self {
+        Self { messages }
+    }
+
     pub fn try_next(&mut self) -> Result<Option<Message>, ImapError> {
         if !self.messages.is_empty() {
             let result = self.messages.remove(0);
-            match result {
-                Ok(message) => Ok(Some(message)),
-                Err(error) => Err(error),
-            }
+            Ok(Some(result))
         } else {
             Ok(None)
         }
