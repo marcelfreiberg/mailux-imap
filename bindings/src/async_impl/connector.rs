@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use bytes::{BufMut, Bytes, BytesMut};
 use memchr::memmem;
 use std::collections::HashMap;
@@ -52,11 +52,20 @@ impl Connector {
         match self.conn_type {
             crate::ConnectionType::Tls => {
                 let config = tls::create_tls_config();
-                let server_name = tls::parse_server_name(&self.addr)?;
+                let server_name = tls::parse_server_name(&self.addr).with_context(|| {
+                    format!("Failed to parse server name from address: {}", self.addr)
+                })?;
 
                 let connector = TlsConnector::from(config);
-                let sock = TcpStream::connect(&self.addr).await?;
-                let stream = connector.connect(server_name, sock).await?;
+                let sock = TcpStream::connect(&self.addr).await.with_context(|| {
+                    format!("Failed to establish TCP connection to {}", self.addr)
+                })?;
+                let stream = connector
+                    .connect(server_name, sock)
+                    .await
+                    .with_context(|| {
+                        format!("Failed to establish TLS connection to {}", self.addr)
+                    })?;
 
                 let (cmd_tx, cmd_rx) = mpsc::channel::<Command>(32);
                 let (unsol_tx, unsol_rx) = broadcast::channel::<Bytes>(64);
@@ -69,7 +78,10 @@ impl Connector {
                     }
                 });
 
-                greeting_rx.await??;
+                greeting_rx
+                    .await
+                    .context("Greeting handler task panicked or was cancelled")?
+                    .context("Failed to process IMAP greeting")?;
 
                 Ok(Client::<Connected> {
                     cmd_tx,
@@ -77,7 +89,7 @@ impl Connector {
                     state: PhantomData,
                 })
             }
-            _ => anyhow::bail!("Connection type not implemented"),
+            _ => anyhow::bail!("Connection type {:?} not implemented", self.conn_type),
         }
     }
 
@@ -94,15 +106,21 @@ impl Connector {
             // Check spare capacity before reading
             if buf.remaining_mut() == 0 {
                 if buf.capacity() >= LINE_CAP {
-                    anyhow::bail!("Greeting too long");
+                    anyhow::bail!(
+                        "IMAP greeting exceeded maximum line length of {} bytes",
+                        LINE_CAP
+                    );
                 }
                 let add = GROW_STEP.min(LINE_CAP - buf.capacity());
                 buf.reserve(add);
             }
 
-            let n = stream.read_buf(&mut buf).await?;
+            let n = stream
+                .read_buf(&mut buf)
+                .await
+                .context("Failed to read data while waiting for IMAP greeting")?;
             if n == 0 {
-                anyhow::bail!("EOF before greeting");
+                anyhow::bail!("Server closed connection before sending greeting");
             }
 
             if let Some(pos) = memmem::find(&buf, b"\r\n") {
@@ -114,7 +132,9 @@ impl Connector {
                     }
                     Ok(None) | Err(imap::parser::ParserError::Incomplete) => continue,
                     Err(e) => {
-                        anyhow::bail!("Greeting parse error: {}", e);
+                        let err = e.to_string();
+                        let _ = greeting_tx.send(Err(e.into()));
+                        anyhow::bail!("Failed to parse IMAP greeting: {}", err);
                     }
                 }
             }
@@ -131,26 +151,30 @@ impl Connector {
         // Main IMAP loop
         loop {
             tokio::select! {
-                n = stream.read_buf(&mut buf) => {
-                    let n = n?;
-                    if n == 0 { anyhow::bail!("Server closed connection") }
+                result = stream.read_buf(&mut buf) => {
+                    let n = result.context("Failed to read data from IMAP server")?;
+                    if n == 0 {
+                        anyhow::bail!("IMAP server closed connection unexpectedly")
+                    }
 
                     while let Some(pos) = memmem::find(&buf, b"\r\n") {
                         let line = buf.split_to(pos + 2).freeze();
-                        Self::route_line(line, &unsol_tx, &mut pending);
+                        Self::route_line(line, &unsol_tx, &mut pending)?;
                     }
 
                     if buf.remaining_mut() == 0 {
                         if buf.capacity() >= LINE_CAP {
-                            anyhow::bail!("IMAP line exceeded {LINE_CAP} bytes");
+                            anyhow::bail!("IMAP response line exceeded maximum length of {} bytes", LINE_CAP);
                         }
                         let add = GROW_STEP.min(LINE_CAP - buf.capacity());
                         buf.reserve(add);
                     }
                 }
                 Some(cmd) = cmd_rx.recv() => {
-                    stream.write_all(cmd.text.as_bytes()).await?;
-                    stream.flush().await?;
+                    stream.write_all(cmd.text.as_bytes()).await
+                        .with_context(|| format!("Failed to send IMAP command: {}", cmd.tag))?;
+                    stream.flush().await
+                        .with_context(|| format!("Failed to flush IMAP command: {}", cmd.tag))?;
                     pending.insert(cmd.tag, cmd.reply);
                 }
                 else => break,
@@ -163,16 +187,22 @@ impl Connector {
         line: Bytes,
         unsol_tx: &broadcast::Sender<Bytes>,
         pending: &mut HashMap<String, oneshot::Sender<Bytes>>,
-    ) {
+    ) -> Result<()> {
         // Simple routing logic - this will be enhanced later with proper parsing
         let tag_end = line.iter().position(|&b| b == b' ').unwrap_or(line.len());
         let tag = &line[..tag_end];
-        if let Some(tx) = pending.remove(unsafe { std::str::from_utf8_unchecked(tag) }) {
+
+        // Convert tag bytes to string safely
+        let tag_str =
+            std::str::from_utf8(tag).context("IMAP response tag contains invalid UTF-8")?;
+
+        if let Some(tx) = pending.remove(tag_str) {
             let _ = tx.send(line);
-            return;
+            return Ok(());
         }
-        
+
         let _ = unsol_tx.send(line);
+        Ok(())
     }
 }
 
