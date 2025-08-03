@@ -1,14 +1,13 @@
+use super::{ParserError, Response, parse_status};
 use nom::{
     IResult, Offset, Parser,
-    bytes::streaming::{tag, take_until},
+    bytes::streaming::take_until,
     character::streaming::{crlf, space1},
     combinator::map,
     sequence::{separated_pair, terminated},
 };
-use std::borrow::Cow;
-use super::{ParserError, Status, Response};
 
-pub fn try_parse_tagged_response(buf: &[u8]) -> Result<Option<(Response<'static>, usize)>, ParserError> {
+pub fn try_parse_tagged_response(buf: &[u8]) -> Result<Option<(Response<'_>, usize)>, ParserError> {
     match parse_tagged_response(buf) {
         Ok((remaining, response)) => Ok(Some((response, buf.offset(remaining)))),
         Err(nom::Err::Incomplete(_)) => Err(ParserError::Incomplete),
@@ -16,7 +15,7 @@ pub fn try_parse_tagged_response(buf: &[u8]) -> Result<Option<(Response<'static>
     }
 }
 
-fn parse_tagged_response(i: &[u8]) -> IResult<&[u8], Response<'static>> {
+fn parse_tagged_response(i: &[u8]) -> IResult<&[u8], Response<'_>> {
     map(
         terminated(
             separated_pair(
@@ -26,19 +25,7 @@ fn parse_tagged_response(i: &[u8]) -> IResult<&[u8], Response<'static>> {
             ),
             crlf,
         ),
-        |(tag, (status, text))| Response::Tagged {
-            tag: Cow::Owned(tag.to_vec()),
-            status,
-            text: Cow::Owned(text.to_vec()),
-        },
-    ).parse(i)
-}
-
-fn parse_status(i: &[u8]) -> IResult<&[u8], Status> {
-    nom::branch::alt((
-        map(tag("OK"), |_| Status::Ok),
-        map(tag("NO"), |_| Status::No),
-        map(tag("BAD"), |_| Status::Bad),
-    ))
+        |(tag, (status, text))| Response::Tagged { tag, status, text },
+    )
     .parse(i)
-} 
+}

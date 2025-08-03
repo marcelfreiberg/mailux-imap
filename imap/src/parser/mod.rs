@@ -1,4 +1,4 @@
-use std::borrow::Cow;
+use nom::{IResult, Parser, branch::alt, bytes::streaming::tag_no_case, combinator::value};
 use thiserror::Error;
 
 pub mod auth;
@@ -17,19 +17,26 @@ pub enum Status {
     Ok,
     No,
     Bad,
-    PreAuth,
-    Bye,
+}
+
+pub fn parse_status(i: &[u8]) -> IResult<&[u8], Status> {
+    alt((
+        value(Status::Ok, tag_no_case("OK")),
+        value(Status::No, tag_no_case("NO")),
+        value(Status::Bad, tag_no_case("BAD")),
+    ))
+    .parse(i)
 }
 
 #[derive(Debug, Clone)]
 pub enum Response<'a> {
     Tagged {
-        tag: Cow<'a, [u8]>,
+        tag: &'a [u8],
         status: Status,
-        text: Cow<'a, [u8]>,
+        text: &'a [u8],
     },
     Untagged {
         status: Status,
-        text: Cow<'a, [u8]>,
+        text: &'a [u8],
     },
 }
