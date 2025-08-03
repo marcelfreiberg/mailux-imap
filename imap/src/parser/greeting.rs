@@ -1,20 +1,20 @@
+use super::{ParserError, Status};
 use nom::{
     IResult, Offset, Parser,
-    bytes::streaming::{tag, tag_no_case},
-    character::streaming::{crlf, not_line_ending, space1},
-    combinator::map,
-    sequence::{delimited, separated_pair},
+    branch::alt,
+    bytes::streaming::{tag, tag_no_case, take_until},
+    character::streaming::crlf,
+    combinator::value,
+    sequence::{preceded, separated_pair, terminated},
 };
-use std::borrow::Cow;
-use super::{ParserError, Status};
 
 #[derive(Debug, Clone)]
 pub struct Greeting<'a> {
     pub status: Status,
-    pub text: Cow<'a, [u8]>,
+    pub text: &'a [u8],
 }
 
-pub fn try_parse_greeting(buf: &[u8]) -> Result<Option<(Greeting, usize)>, ParserError> {
+pub fn try_parse(buf: &[u8]) -> Result<Option<(Greeting, usize)>, ParserError> {
     match parse_greeting(buf) {
         Ok((remaining, greeting)) => Ok(Some((greeting, buf.offset(remaining)))),
         Err(nom::Err::Incomplete(_)) => Err(ParserError::Incomplete),
@@ -23,21 +23,22 @@ pub fn try_parse_greeting(buf: &[u8]) -> Result<Option<(Greeting, usize)>, Parse
 }
 
 fn parse_greeting(i: &[u8]) -> IResult<&[u8], Greeting<'_>> {
-    map(
-        delimited(
-            tag("* "),
-            separated_pair(parse_greeting_status, space1, not_line_ending),
+    preceded(
+        tag("* "),
+        terminated(
+            separated_pair(parse_greeting_status, tag(" "), take_until("\r\n")),
             crlf,
-        ),
-        |(status, text)| Greeting { status, text: Cow::Borrowed(text) },
-    ).parse(i)
+        )
+        .map(|(status, text)| Greeting { status, text }),
+    )
+    .parse(i)
 }
 
 fn parse_greeting_status(i: &[u8]) -> IResult<&[u8], Status> {
-    nom::branch::alt((
-        map(tag_no_case("OK"), |_| Status::Ok),
-        map(tag_no_case("PREAUTH"), |_| Status::PreAuth),
-        map(tag_no_case("BYE"), |_| Status::Bye),
+    alt((
+        value(Status::Ok, tag_no_case("OK")),
+        value(Status::PreAuth, tag_no_case("PREAUTH")),
+        value(Status::Bye, tag_no_case("BYE")),
     ))
     .parse(i)
-} 
+}

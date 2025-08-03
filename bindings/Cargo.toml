@@ -5,17 +5,18 @@ edition = "2024"
 
 [features]
 default = ["tokio-runtime"]
-tokio-runtime = ["dep:tokio", "dep:tokio-rustls", "dep:tokio-util", "dep:tokio-stream"]
+tokio-runtime = ["dep:tokio", "dep:tokio-rustls", "dep:tokio-stream"]
 blocking = []
 
 [dependencies]
 imap = { workspace = true }
+anyhow = "1.0.98"
+bytes = "1.10.1"
+memchr = "2.7.5"
 rustls = "0.23.29"
 tracing = "0.1.41"
 tracing-subscriber = "0.3.19"
-bytes = "1.10.1"
 
 tokio = { version = "1.46.1", features = ["full"], optional = true }
 tokio-rustls = { version = "0.26.2", optional = true }
-tokio-util = { version = "0.7.15", features = ["codec"], optional = true }
 tokio-stream = { version = "0.1.17", optional = true }

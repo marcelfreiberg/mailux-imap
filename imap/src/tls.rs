@@ -1,4 +1,4 @@
-use crate::ImapError;
+use crate::error::ImapError;
 use rustls::pki_types::ServerName;
 use rustls::{ClientConfig, RootCertStore};
 use std::sync::Arc;
