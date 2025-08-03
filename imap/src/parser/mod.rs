@@ -3,7 +3,6 @@ use thiserror::Error;
 
 pub mod auth;
 pub mod greeting;
-pub mod mailbox;
 
 #[derive(Error, Debug)]
 pub enum ParserError {
