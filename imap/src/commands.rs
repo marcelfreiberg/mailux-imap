@@ -1,82 +1,92 @@
-use std::fmt;
-use std::sync::atomic::{AtomicU32, Ordering};
-
-static TAG_COUNTER: AtomicU32 = AtomicU32::new(1);
-
-fn next_tag() -> String {
-    let tag_num = TAG_COUNTER.fetch_add(1, Ordering::SeqCst);
-    format!("A{:04}", tag_num)
-}
-
-// For testing
-pub fn reset_tag_counter() {
-    TAG_COUNTER.store(1, Ordering::SeqCst);
-}
-
-pub trait Command {
-    fn to_bytes(&self) -> Vec<u8>;
-    fn tag(&self) -> &str;
-}
-
-pub struct LoginCommandBuilder {
+pub struct CommandBuilder {
     tag: String,
-    username: String,
-    password: String,
 }
 
-impl LoginCommandBuilder {
-    pub fn new() -> Self {
+impl CommandBuilder {
+    pub fn new(tag: &str) -> Self {
         Self {
-            tag: next_tag(),
-            username: String::new(),
-            password: String::new(),
+            tag: tag.to_string(),
         }
     }
 
-    pub fn tag(mut self, tag: &str) -> Self {
-        self.tag = tag.to_string();
-        self
+    pub fn login(self) -> LoginCommandBuilder<NoUsername, NoPassword> {
+        LoginCommandBuilder::new(&self.tag)
     }
 
-    pub fn username(mut self, username: &str) -> Self {
-        self.username = username.to_string();
-        self
-    }
+    // Future commands to add:
+    // pub fn select(self) -> SelectCommandBuilder<NoMailbox> { ... }
+    // pub fn fetch(self) -> FetchCommandBuilder<NoRange, NoItems> { ... }
+    // pub fn search(self) -> SearchCommandBuilder<NoCriteria> { ... }
+}
 
-    pub fn password(mut self, password: &str) -> Self {
-        self.password = password.to_string();
-        self
-    }
+pub struct NoUsername;
+pub struct HasUsername(String);
+pub struct NoPassword;
+pub struct HasPassword(String);
 
-    pub fn build(self) -> LoginCommand {
-        LoginCommand {
+pub struct LoginCommandBuilder<U = NoUsername, P = NoPassword> {
+    tag: String,
+    username: U,
+    password: P,
+}
+
+impl LoginCommandBuilder<NoUsername, NoPassword> {
+    fn new(tag: &str) -> Self {
+        Self {
+            tag: tag.to_string(),
+            username: NoUsername,
+            password: NoPassword,
+        }
+    }
+}
+
+impl<P> LoginCommandBuilder<NoUsername, P> {
+    pub fn username(self, username: &str) -> LoginCommandBuilder<HasUsername, P> {
+        LoginCommandBuilder {
             tag: self.tag,
-            username: self.username,
+            username: HasUsername(username.to_string()),
             password: self.password,
         }
     }
 }
 
-pub struct LoginCommand {
-    tag: String,
-    username: String,
-    password: String,
-}
-
-impl Command for LoginCommand {
-    fn to_bytes(&self) -> Vec<u8> {
-        format!("{} LOGIN {} {}", self.tag, self.username, self.password)
-            .as_bytes()
-            .to_vec()
-    }
-
-    fn tag(&self) -> &str {
-        &self.tag
+impl<U> LoginCommandBuilder<U, NoPassword> {
+    pub fn password(self, password: &str) -> LoginCommandBuilder<U, HasPassword> {
+        LoginCommandBuilder {
+            tag: self.tag,
+            username: self.username,
+            password: HasPassword(password.to_string()),
+        }
     }
 }
 
-impl fmt::Display for LoginCommand {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{} LOGIN {} {}", self.tag, self.username, self.password)
+impl LoginCommandBuilder<HasUsername, HasPassword> {
+    pub fn as_string(&self) -> String {
+        format!("{} LOGIN {} {}", self.tag, self.username.0, self.password.0)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_login_command() {
+        let command = CommandBuilder::new("A0001")
+            .login()
+            .username("testuser")
+            .password("testpass");
+
+        assert_eq!(command.as_string(), "A0001 LOGIN testuser testpass");
+    }
+
+    #[test]
+    fn test_login_command_order_independence() {
+        let command = CommandBuilder::new("A0001")
+            .login()
+            .password("pass")
+            .username("user");
+
+        assert_eq!(command.as_string(), "A0001 LOGIN user pass");
     }
 }
