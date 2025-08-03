@@ -4,55 +4,45 @@ use std::io::Write;
 use std::marker::PhantomData;
 use std::net::TcpStream;
 
+use crate::{ConnectedStateState, AuthenticatedStateState};
 use imap::{ImapError, tls};
 use imap::messages::{Message, Messages};
 
-// Connection states
-pub struct Connected;
-pub struct Authenticated;
-
 pub struct Builder {
     addr: String,
-    conn_type: ConnectionType,
+    conn_type: crate::ConnectionType,
 }
 
 pub struct Connector {
     addr: String,
-    conn_type: ConnectionType,
+    conn_type: crate::ConnectionType,
 }
 
-pub struct Client<State = Connected> {
+pub struct Client<State> {
     stream: StreamOwned<rustls::ClientConnection, TcpStream>,
-    state: PhantomData<State>,
-}
-
-#[derive(Debug)]
-enum ConnectionType {
-    Tls,
-    StartTls,
-    Plain,
+    _state: PhantomData<State>,
 }
 
 impl Builder {
     pub fn new(addr: &str) -> Self {
         Self {
             addr: addr.to_string(),
-            conn_type: ConnectionType::Tls,
+            conn_type: crate::ConnectionType::Tls,
         }
     }
 
     pub fn tls(mut self) -> Self {
-        self.conn_type = ConnectionType::Tls;
+        self.conn_type = crate::ConnectionType::Tls;
         self
     }
 
     pub fn starttls(mut self) -> Self {
-        self.conn_type = ConnectionType::StartTls;
+        self.conn_type = crate::ConnectionType::StartTls;
         self
     }
 
     pub fn plain(mut self) -> Self {
-        self.conn_type = ConnectionType::Plain;
+        self.conn_type = crate::ConnectionType::Plain;
         self
     }
 
@@ -63,18 +53,18 @@ impl Builder {
         }
     }
 
-    pub fn connect(self) -> Result<Client<Connected>, ImapError> {
+    pub fn connect(self) -> Result<Client<ConnectedState>, ImapError> {
         self.build().connect()
     }
 }
 
 impl Connector {
     #[tracing::instrument(skip(self), fields(addr = %self.addr, conn_type = ?self.conn_type))]
-    pub fn connect(self) -> Result<Client<Connected>, ImapError> {
+    pub fn connect(self) -> Result<Client<ConnectedState>, ImapError> {
         tracing::info!("Connecting to IMAP server");
 
         match self.conn_type {
-            ConnectionType::Tls => {
+            crate::ConnectionType::Tls => {
                 let config = tls::create_tls_config();
                 let server_name = tls::parse_server_name(&self.addr)?;
 
@@ -113,21 +103,21 @@ impl Connector {
     }
 }
 
-pub fn connect_tls(addr: &str) -> Result<Client<Connected>, ImapError> {
+pub fn connect_tls(addr: &str) -> Result<Client<ConnectedStateState>, ImapError> {
     Builder::new(addr).tls().build().connect()
 }
 
-pub fn connect_starttls(addr: &str) -> Result<Client<Connected>, ImapError> {
+pub fn connect_starttls(addr: &str) -> Result<Client<ConnectedStateState>, ImapError> {
     Builder::new(addr).starttls().build().connect()
 }
 
-pub fn connect_plain(addr: &str) -> Result<Client<Connected>, ImapError> {
+pub fn connect_plain(addr: &str) -> Result<Client<ConnectedStateState>, ImapError> {
     Builder::new(addr).plain().build().connect()
 }
 
-impl Client<Connected> {
+impl Client<ConnectedStateState> {
     #[tracing::instrument(skip(self, pass))]
-    pub fn login(mut self, user: &str, pass: &str) -> Result<Client<Authenticated>, ImapError> {
+    pub fn login(mut self, user: &str, pass: &str) -> Result<Client<AuthenticatedStateState>, ImapError> {
         tracing::info!("Attempting IMAP login");
 
         self.stream
@@ -158,7 +148,7 @@ impl Client<Connected> {
     }
 }
 
-impl Client<Authenticated> {
+impl Client<AuthenticatedStateState> {
     pub fn fetch(&mut self, _mailbox: &str, _id: u32) -> Result<Messages, ImapError> {
         Ok(Messages {
             messages: vec![

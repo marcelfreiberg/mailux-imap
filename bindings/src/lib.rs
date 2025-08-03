@@ -14,3 +14,7 @@ pub enum ConnectionType {
     StartTls,
     Plain,
 }
+
+pub struct ConnectedState;
+
+pub struct AuthenticatedState;

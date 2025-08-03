@@ -1,5 +1,6 @@
 use anyhow::Result;
-use crate::async_impl::{Connector, Client, Connected};
+use crate::async_impl::{Connector, Client};
+use crate::ConnectedState;
 
 pub struct Builder {
     addr: String,
@@ -35,19 +36,19 @@ impl Builder {
 
     pub async fn connect(
         self,
-    ) -> Result<Client<Connected>> {
+    ) -> Result<Client<ConnectedState>> {
         self.build().connect().await
     }
 }
 
-pub async fn connect_tls(addr: &str) -> Result<Client<Connected>> {
+pub async fn connect_tls(addr: &str) -> Result<Client<ConnectedState>> {
     Builder::new(addr).tls().build().connect().await
 }
 
-pub async fn connect_starttls(addr: &str) -> Result<Client<Connected>> {
+pub async fn connect_starttls(addr: &str) -> Result<Client<ConnectedState>> {
     Builder::new(addr).starttls().build().connect().await
 }
 
-pub async fn connect_plain(addr: &str) -> Result<Client<Connected>> {
+pub async fn connect_plain(addr: &str) -> Result<Client<ConnectedState>> {
     Builder::new(addr).plain().build().connect().await
 }

@@ -9,13 +9,12 @@ use tokio::sync::{broadcast, mpsc, oneshot};
 use tokio_rustls::TlsConnector;
 use tokio_rustls::client::TlsStream;
 
+use crate::{ConnectedState, AuthenticatedState};
+
 use imap::commands::{Command, LoginCommandBuilder};
 use imap::messages::{Message, Messages};
 use imap::parser::greeting;
 use imap::tls;
-
-pub struct Connected;
-pub struct Authenticated;
 
 const LINE_CAP: usize = 8 * 1024;
 const GROW_STEP: usize = 2 * 1024; // 2 KiB increments (one TLS record fragment)
@@ -28,7 +27,7 @@ pub struct Connector {
 pub struct Client<State> {
     cmd_tx: mpsc::Sender<Box<dyn Command + Send + Sync>>,
     unsol_rx: broadcast::Receiver<Bytes>,
-    state: PhantomData<State>,
+    _state: PhantomData<State>,
 }
 
 impl Connector {
@@ -40,7 +39,7 @@ impl Connector {
     }
 
     #[tracing::instrument(skip(self), fields(addr = %self.addr, conn_type = ?self.conn_type))]
-    pub async fn connect(self) -> Result<Client<Connected>> {
+    pub async fn connect(self) -> Result<Client<ConnectedState>> {
         tracing::info!("Connecting to IMAP server");
 
         match self.conn_type {
@@ -77,10 +76,10 @@ impl Connector {
                     .context("Greeting handler task panicked or was cancelled")?
                     .context("Failed to process IMAP greeting")?;
 
-                Ok(Client::<Connected> {
+                Ok(Client::<ConnectedState> {
                     cmd_tx,
                     unsol_rx,
-                    state: PhantomData,
+                    _state: PhantomData,
                 })
             }
             _ => anyhow::bail!("Connection type {:?} not implemented", self.conn_type),
@@ -202,9 +201,9 @@ impl Connector {
     }
 }
 
-impl Client<Connected> {
+impl Client<ConnectedState> {
     #[tracing::instrument(skip(self, pass))]
-    pub async fn login(mut self, user: &str, pass: &str) -> Result<Client<Authenticated>> {
+    pub async fn login(mut self, user: &str, pass: &str) -> Result<Client<AuthenticatedState>> {
         tracing::info!("Attempting IMAP login");
 
         let login_command = LoginCommandBuilder::new()
@@ -226,15 +225,15 @@ impl Client<Connected> {
         
         // TODO: parse response
 
-        Ok(Client::<Authenticated> {
+        Ok(Client::<AuthenticatedState> {
             cmd_tx: self.cmd_tx,
             unsol_rx: self.unsol_rx,
-            state: PhantomData,
+            _state: PhantomData,
         })
     }
 }
 
-impl Client<Authenticated> {
+impl Client<AuthenticatedState> {
     pub async fn fetch(&mut self, _mailbox: &str, _id: u32) -> Result<Messages> {
         Ok(Messages::new(vec![
             Message::new("Subject1".to_string()),
