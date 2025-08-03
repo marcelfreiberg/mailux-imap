@@ -9,6 +9,7 @@ use tokio::sync::{broadcast, mpsc, oneshot};
 use tokio_rustls::TlsConnector;
 use tokio_rustls::client::TlsStream;
 
+use imap::commands::{Command, LoginCommandBuilder};
 use imap::messages::{Message, Messages};
 use imap::parser::greeting;
 use imap::tls;
@@ -19,20 +20,13 @@ pub struct Authenticated;
 const LINE_CAP: usize = 8 * 1024;
 const GROW_STEP: usize = 2 * 1024; // 2 KiB increments (one TLS record fragment)
 
-// Will be later replaced
-struct Command {
-    tag: String,
-    text: String,
-    reply: oneshot::Sender<Bytes>,
-}
-
 pub struct Connector {
     addr: String,
     conn_type: crate::ConnectionType,
 }
 
 pub struct Client<State> {
-    cmd_tx: mpsc::Sender<Command>,
+    cmd_tx: mpsc::Sender<Box<dyn Command + Send + Sync>>,
     unsol_rx: broadcast::Receiver<Bytes>,
     state: PhantomData<State>,
 }
@@ -67,7 +61,7 @@ impl Connector {
                         format!("Failed to establish TLS connection to {}", self.addr)
                     })?;
 
-                let (cmd_tx, cmd_rx) = mpsc::channel::<Command>(32);
+                let (cmd_tx, cmd_rx) = mpsc::channel::<Box<dyn Command + Send + Sync>>(32);
                 let (unsol_tx, unsol_rx) = broadcast::channel::<Bytes>(64);
                 let (greeting_tx, greeting_rx) = oneshot::channel::<Result<()>>();
 
@@ -95,7 +89,7 @@ impl Connector {
 
     async fn run_imap_loop(
         mut stream: TlsStream<TcpStream>,
-        mut cmd_rx: mpsc::Receiver<Command>,
+        mut cmd_rx: mpsc::Receiver<Box<dyn Command + Send + Sync>>,
         unsol_tx: broadcast::Sender<Bytes>,
         greeting_tx: oneshot::Sender<Result<()>>,
     ) -> Result<()> {
@@ -171,11 +165,13 @@ impl Connector {
                     }
                 }
                 Some(cmd) = cmd_rx.recv() => {
-                    stream.write_all(cmd.text.as_bytes()).await
-                        .with_context(|| format!("Failed to send IMAP command: {}", cmd.tag))?;
+                    let cmd_bytes = cmd.to_bytes();
+                    stream.write_all(&cmd_bytes).await
+                        .with_context(|| format!("Failed to send IMAP command: {}", cmd.tag()))?;
                     stream.flush().await
-                        .with_context(|| format!("Failed to flush IMAP command: {}", cmd.tag))?;
-                    pending.insert(cmd.tag, cmd.reply);
+                        .with_context(|| format!("Failed to flush IMAP command: {}", cmd.tag()))?;
+                    // TODO: Handle command responses - pending functionality needs to be redesigned
+                    // pending.insert(cmd.tag().to_string(), ???);
                 }
                 else => break,
             }
@@ -207,9 +203,28 @@ impl Connector {
 }
 
 impl Client<Connected> {
-    #[tracing::instrument(skip(self, _pass))]
-    pub async fn login(self, _user: &str, _pass: &str) -> Result<Client<Authenticated>> {
+    #[tracing::instrument(skip(self, pass))]
+    pub async fn login(mut self, user: &str, pass: &str) -> Result<Client<Authenticated>> {
         tracing::info!("Attempting IMAP login");
+
+        let login_command = LoginCommandBuilder::new()
+            .username(user)
+            .password(pass)
+            .build();
+
+        self.cmd_tx
+            .send(Box::new(login_command))
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to send login command: {}", e))?;
+
+        let response = self
+            .unsol_rx
+            .recv()
+            .await
+            .context("Login command timed out")?;
+        tracing::debug!("Login response: {:?}", String::from_utf8_lossy(&response));
+        
+        // TODO: parse response
 
         Ok(Client::<Authenticated> {
             cmd_tx: self.cmd_tx,
