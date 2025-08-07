@@ -2,6 +2,7 @@ use nom::{IResult, Parser, branch::alt, bytes::streaming::tag_no_case, combinato
 use thiserror::Error;
 
 pub mod auth;
+pub mod fetch;
 pub mod greeting;
 
 #[derive(Error, Debug)]
