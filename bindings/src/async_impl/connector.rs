@@ -12,9 +12,10 @@ use tokio_rustls::client::TlsStream;
 use crate::{AuthenticatedState, ConnectedState, next_tag};
 
 use imap::commands::CommandBuilder;
-use imap::messages::{Message, Messages};
 use imap::parser::{fetch, greeting};
 use imap::tls;
+use imap::types::command::{SequenceBound, SequenceSet};
+use imap::types::response::{Envelope, FetchData};
 
 const LINE_CAP: usize = 8 * 1024;
 const GROW_STEP: usize = 2 * 1024; // 2 KiB increments (one TLS record fragment)
@@ -275,7 +276,7 @@ impl Client<ConnectedState> {
 }
 
 impl Client<AuthenticatedState> {
-    pub async fn fetch(&mut self, mailbox: &str, id: u32) -> Result<Messages> {
+    pub async fn fetch(&mut self, mailbox: &str, id: u32) -> Result<Vec<Envelope>> {
         // Select mailbox (simple approach; future: cache selected mailbox)
         let sel_tag = next_tag();
         let select_cmd = CommandBuilder::new(&sel_tag).select(mailbox).as_string();
@@ -300,10 +301,7 @@ impl Client<AuthenticatedState> {
         }
 
         // Build FETCH 1:id ENVELOPE for subjects
-        let set = imap::commands::SequenceSet::new().add_range(
-            imap::commands::SequenceBound::Number(1),
-            imap::commands::SequenceBound::Number(id),
-        );
+        let set = SequenceSet::new().add_range(SequenceBound::Number(1), SequenceBound::Number(id));
         let fetch_tag = next_tag();
         let fetch_cmd = CommandBuilder::new(&fetch_tag)
             .fetch(set)
@@ -320,17 +318,17 @@ impl Client<AuthenticatedState> {
             .context("Failed to send FETCH command")?;
         let lines = rx.await.context("FETCH timed out")?;
 
-        let mut subjects = Vec::new();
         let mut joined = BytesMut::new();
         for l in &lines {
             joined.extend_from_slice(l);
         }
-        for (_num, env) in fetch::fetch_envelopes(&joined) {
-            if let Some(subject) = env.subject {
-                subjects.push(Message::new(subject));
+        let mut envelopes = Vec::new();
+        for (_num, data) in fetch::fetch_envelopes(&joined) {
+            if let FetchData::Envelope(env) = data {
+                envelopes.push(env);
             }
         }
 
-        Ok(Messages::new(subjects))
+        Ok(envelopes)
     }
 }

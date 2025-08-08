@@ -1,5 +1,6 @@
 use nom::{IResult, Parser, branch::alt, bytes::streaming::tag_no_case, combinator::value};
 use thiserror::Error;
+use crate::types::common::Status;
 
 pub mod auth;
 pub mod fetch;
@@ -11,13 +12,6 @@ pub enum ParserError {
     Incomplete,
     #[error("Invalid IMAP response")]
     InvalidResponse,
-}
-
-#[derive(Debug, Clone)]
-pub enum Status {
-    Ok,
-    No,
-    Bad,
 }
 
 pub fn parse_status(i: &[u8]) -> IResult<&[u8], Status> {

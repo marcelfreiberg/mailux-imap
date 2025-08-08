@@ -30,12 +30,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         count, mailbox
     );
     let t2 = Instant::now();
-    let mut msgs = session.fetch(&mailbox, count).await?;
-
-    let mut idx = 1u32;
-    while let Some(msg) = msgs.try_next()? {
-        println!("#{:02}  {}", idx, msg.subject());
-        idx += 1;
+    let envelopes = session.fetch(&mailbox, count).await?;
+    for (idx, env) in envelopes.into_iter().enumerate() {
+        println!(
+            "#{:02}  {}",
+            idx + 1,
+            env.subject.as_deref().unwrap_or("(no subject)")
+        );
     }
     println!("Fetched in {:.2?}", t2.elapsed());
 

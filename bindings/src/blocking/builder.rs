@@ -4,9 +4,9 @@ use std::io::Write;
 use std::marker::PhantomData;
 use std::net::TcpStream;
 
-use crate::{ConnectedStateState, AuthenticatedStateState};
+use crate::{AuthenticatedStateState, ConnectedStateState};
+use imap::types::Envelope;
 use imap::{ImapError, tls};
-use imap::messages::{Message, Messages};
 
 pub struct Builder {
     addr: String,
@@ -78,7 +78,7 @@ impl Connector {
 
                 tracing::info!("TLS connection established");
 
-                Ok(Client { 
+                Ok(Client {
                     stream,
                     state: PhantomData,
                 })
@@ -117,23 +117,25 @@ pub fn connect_plain(addr: &str) -> Result<Client<ConnectedStateState>, ImapErro
 
 impl Client<ConnectedStateState> {
     #[tracing::instrument(skip(self, pass))]
-    pub fn login(mut self, user: &str, pass: &str) -> Result<Client<AuthenticatedStateState>, ImapError> {
+    pub fn login(
+        mut self,
+        user: &str,
+        pass: &str,
+    ) -> Result<Client<AuthenticatedStateState>, ImapError> {
         tracing::info!("Attempting IMAP login");
 
         self.stream
-            .write_all(format!("a001 LOGIN {} {}\r\n", user, pass).as_bytes()) ?;
+            .write_all(format!("a001 LOGIN {} {}\r\n", user, pass).as_bytes())?;
 
         let mut line = String::new();
-        self.stream
-            .read_line(&mut line)?;
+        self.stream.read_line(&mut line)?;
 
         if !line.starts_with("* CAPABILITY") {
             return Err(ImapError::Connection(line));
         }
 
         line.clear();
-        self.stream
-            .read_line(&mut line)?;
+        self.stream.read_line(&mut line)?;
 
         if !line.starts_with("a001 OK") {
             return Err(ImapError::ConnectionFailed(line));
@@ -149,16 +151,14 @@ impl Client<ConnectedStateState> {
 }
 
 impl Client<AuthenticatedStateState> {
-    pub fn fetch(&mut self, _mailbox: &str, _id: u32) -> Result<Messages, ImapError> {
-        Ok(Messages {
-            messages: vec![
-                Ok(Message {
-                    subject: "Subject1".to_string(),
-                }),
-                Ok(Message {
-                    subject: "Subject2".to_string(),
-                }),
-            ],
-        })
+    pub fn fetch(&mut self, _mailbox: &str, _id: u32) -> Result<Vec<Envelope>, ImapError> {
+        Ok(vec![
+            Envelope {
+                subject: Some("Subject1".to_string()),
+            },
+            Envelope {
+                subject: Some("Subject2".to_string()),
+            },
+        ])
     }
 }

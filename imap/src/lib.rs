@@ -1,6 +1,8 @@
 mod error;
 
+pub(crate) mod format;
+
 pub mod commands;
-pub mod messages;
 pub mod parser;
 pub mod tls;
+pub mod types;

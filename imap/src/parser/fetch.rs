@@ -1,10 +1,7 @@
-#[derive(Debug, Clone)]
-pub struct Envelope {
-    pub subject: Option<String>,
-}
+use crate::types::response::{Envelope, FetchData};
 
-pub fn fetch_envelopes(buf: &[u8]) -> Vec<(u32, Envelope)> {
-    let mut res = Vec::new();
+pub fn fetch_envelopes(buf: &[u8]) -> Vec<(u32, FetchData)> {
+    let mut res: Vec<(u32, FetchData)> = Vec::new();
     let mut i = 0;
     while let Some(pos) = find_subsequence(&buf[i..], b"* ") {
         let start = i + pos + 2; // after "* "
@@ -46,7 +43,7 @@ pub fn fetch_envelopes(buf: &[u8]) -> Vec<(u32, Envelope)> {
             }
             None => None,
         };
-        res.push((num, Envelope { subject }));
+        res.push((num, FetchData::Envelope(Envelope { subject })));
         i = j;
     }
     res
